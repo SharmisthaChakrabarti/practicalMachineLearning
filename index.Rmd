@@ -1,0 +1,126 @@
+---
+title: "Practical Machine Learning - Prediction Assignment Writeup"
+author: "Sharmistha Chakrabarti"
+date: "June 19, 2017"
+output:
+  html_document: 
+    keep_md: yes
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, cache=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## BACKGROUND
+
+Using devices such as *Jawbone Up, Nike FuelBand,* and *Fitbit* it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of Six young health participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The training data consists of accelerometer data and a label identifying the quality of the activity the participant was doing, whereas the testing data consists of accelerometer data without the identifying label. Our goal is to predict the labels for the test set observations.
+
+The code below is used for model evaluation and selection, estimating the out-of-sample error, and making predictions on the test set observations. 
+
+## DATA PROCESSING
+
+Let's load the necessary `R packages` and the training and test data sets.
+
+### Data Loading
+
+```{r load libraries, warning=FALSE, message=FALSE}
+## Load the required packages
+library(caret); library(ggplot2); library(randomForest); library(rattle); library(rpart); library(rpart.plot)
+```
+
+```{r load the data}
+training <- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!", ""), header = TRUE)
+testing <- read.csv("pml-testing.csv", na.strings = c("NA", "#DIV/0!", ""), header = TRUE)
+## dim(training); dim(testing)
+```
+
+The training dataset has `r dim(training)[1]` observations and `r dim(training)[2]` variables, whereas the test dataset has `r dim(testing)[1]` observations and `r dim(testing)[2]` variables. The goal of the project is to predict the manner in which the six participants did the exercise. That is, we need to predict the `"classe"` variable in the training set. 
+
+### Data Cleaning
+
+An inititial look at the raw data indicates that some data cleaning is necessary. The number of variables would be reduced by 
+
+* Removing the variables (predictors) with near zero variance.
+* Removing the first seven columns (predictors) as these variables have little to no predicting power for the outcome `classe`.
+* Deleting the columns (predictors) containing missing value.
+
+```{r data cleaning}
+nzv <- nearZeroVar(training)
+training <- training[, -nzv]
+testing <- testing[, -nzv]
+
+training <- training[ , -c(1:7)]
+testing <- testing[ , -c(1:7)]
+
+training <- training[ , colSums(is.na(training)) == 0]
+testing <- testing[ , colSums(is.na(testing)) == 0]
+
+## dim(training); dim(testing)
+## names(training); names(testing)
+
+## check if the column names training and testing sets are same: 
+all.equal(names(training)[1:length(names(training))-1], names(testing)[1:length(names(testing))-1])
+```
+
+The cleaned data sets `training` and `testing` have 52 variables each with names of first 51 variables same. The last variable of `training` and `testing` sets are ``r names(training)[52]`` and ``r names(testing)[52]``, respectively.
+
+### Data Partitioning
+
+The cleaned training set is partitioned into training set (for prediction) and validation set (for computing the out-of-sample errors).
+
+```{r data partitioning}
+set.seed(12345)
+inTrain <- createDataPartition(y=training$classe, p=0.7, list=FALSE)
+train <- training[inTrain, ]
+valid <- training[-inTrain, ]
+##dim(train); dim(valid)
+```
+
+## MODEL EVALUATION AND SELECTION (PREDICTIVE ALGORITHMS)
+
+In order to predict the outcome, the classification tree and random forest algorithms are implemented below:
+
+#### *Classification Tree*
+
+A 5-fold cross validation is used below using the `trainControl` function.
+
+```{r classification tree}
+modFit_rpart <- train(classe ~ ., data = train, method = "rpart", trControl = trainControl(method = "cv", number =5))
+print(modFit_rpart)
+
+fancyRpartPlot(modFit_rpart$finalModel)
+
+## Predicting the outcomes using the validation set
+predict_rpart <- predict(modFit_rpart, valid)
+## Using the confusion matrix to test the accuracy of the model (classification tree)
+confusion_rpart <- confusionMatrix(predict_rpart, valid$classe); confusion_rpart
+```
+
+From the above `Confusion Matrix and Statistics`, the accuracy rate of the model is `r (round(confusion_rpart$overall[1], 3))*100`%. So, the out-of-sample error rate is about `r (1-round(confusion_rpart$overall[1], 3))*100`%. As it turns out that the classification tree model is not predicting the outcome `classe` too well. Let's implement random forest algorithm and see if it improves the accuracy rate of prediction and reduces the out-of-sample error rate.
+
+#### *Random Forest*
+
+```{r random forest, cache=TRUE}
+modFit_rf <- train(classe ~ ., data = train, method = "rf", trControl = trainControl(method = "cv", number = 5))
+print(modFit_rf)
+
+## Predicting the outcomes using the validation set
+predict_rf <- predict(modFit_rf, valid)
+## Using the confusion matrix to test the accuracy of the model (random forest)
+confusion_rf <- confusionMatrix(predict_rf, valid$classe); confusion_rf
+```
+
+The random forest prediction algorithm improved the accuracy rate (`r (round(confusion_rf$overall[1], 3))*100`%) of prediction significantly. This results in the out-of-sample error rate of `r (1-round(confusion_rf$overall[1], 3))*100`%. This is an excellent result and so the random forest model is used to make predictions on the test data set. It is notable though that the computation time of the random forest algorithm was fairly long. 
+
+## PREDICTION ON TESTING SET
+
+The random forest predictive model `modFit_rf` is used below to predict the outcome of the `classe` variable for the 20 different test cases.
+
+```{r}
+pred_testing <- predict(modFit_rf, testing); pred_testing
+```
